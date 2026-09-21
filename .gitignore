@@ -15,3 +15,4 @@ ios/Flutter/ephemeral/
 .toolcache/
 bridge/tvbox-Swift-macOS/
 bridge/local/state/
+artifacts/
