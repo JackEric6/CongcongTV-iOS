@@ -87,7 +87,7 @@ enum Mapper {
 
 extension VOD {
     init(dict: [String: Any]) throws {
-        let formatter = JSONSerialization.data(withJSONObject: dict, options: [])
+        let formatter = try JSONSerialization.data(withJSONObject: dict, options: [])
         self = try JSONDecoder().decode(VOD.self, from: formatter)
     }
 }

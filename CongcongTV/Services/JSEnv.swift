@@ -190,7 +190,10 @@ final class JSEnv {
         }
         if activeRuleName == name { return true }
         guard let ctx = ensureContext() else { return false }
-        ctx.evaluateScript("globalThis.CongcongTV.init(arguments[0]);", withArguments: [text])
+        // 把规则 JS 作为字符串字面量嵌入调用（无 withArguments：JSContext 无此 API，
+        // 只能 source 内联或 objectForKeyedSubscript().call）
+        let ruleLiteral = jsStringLiteral(text)
+        ctx.evaluateScript("globalThis.CongcongTV.init(\(ruleLiteral));")
         activeRuleName = name
         return true
     }
@@ -208,8 +211,7 @@ final class JSEnv {
         if let p = params, !p.isEmpty {
             let json = (try? JSONSerialization.data(withJSONObject: p)) ?? Data()
             let str = String(data: json, encoding: .utf8) ?? "{}"
-            let js = "globalThis.CongcongTV.homeVod(JSON.parse(arguments[0]))"
-            if let v = ctx.evaluateScript(js, withArguments: [str]).toObject() {
+            if let v = ctx.evaluateScript("globalThis.CongcongTV.homeVod(\(jsStringLiteral(str)))").toObject() {
                 return Mapper.vodList(from: v)
             }
         } else {
@@ -222,8 +224,8 @@ final class JSEnv {
 
     private func categoryCore(tid: String, pg: Int) -> [VOD] {
         guard let ctx = context else { return [] }
-        let js = "globalThis.CongcongTV.category(arguments[0], arguments[1], false, '')"
-        if let v = ctx.evaluateScript(js, withArguments: [tid, pg]).toObject() {
+        let js = "globalThis.CongcongTV.category(\(jsStringLiteral(tid)), \(pg), false, '')"
+        if let v = ctx.evaluateScript(js).toObject() {
             return Mapper.vodList(from: v)
         }
         return []
@@ -231,16 +233,15 @@ final class JSEnv {
 
     private func detailCore(vodId: String) -> VOD? {
         guard let ctx = context else { return nil }
-        let js = "globalThis.CongcongTV.detail(arguments[0])"
-        let v = ctx.evaluateScript(js, withArguments: [vodId]).toObject()
+        let js = "globalThis.CongcongTV.detail(\(jsStringLiteral(vodId)))"
+        let v = ctx.evaluateScript(js).toObject()
         return Mapper.vodDetail(from: v)
     }
 
     private func searchCore(wd: String, pg: Int = 1) -> [VOD] {
         guard let ctx = context else { return [] }
-        let encoded = wd.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? wd
-        let js = "globalThis.CongcongTV.search(arguments[0], true, arguments[1])"
-        if let v = ctx.evaluateScript(js, withArguments: [encoded, pg]).toObject() {
+        let js = "globalThis.CongcongTV.search(\(jsStringLiteral(wd)), true, \(pg))"
+        if let v = ctx.evaluateScript(js).toObject() {
             return Mapper.vodList(from: v)
         }
         return []
@@ -248,8 +249,8 @@ final class JSEnv {
 
     private func playCore(flag: String, url: String) -> PlayResult {
         guard let ctx = context else { return PlayResult() }
-        let js = "globalThis.CongcongTV.play(arguments[0], arguments[1], '')"
-        if let v = ctx.evaluateScript(js, withArguments: [flag, url]).toObject() {
+        let js = "globalThis.CongcongTV.play(\(jsStringLiteral(flag)), \(jsStringLiteral(url)), '')"
+        if let v = ctx.evaluateScript(js).toObject() {
             return Mapper.playResult(from: v) ?? PlayResult()
         }
         return PlayResult()
@@ -326,6 +327,32 @@ private extension String {
     var lastPathComponent: String {
         (self as NSString).lastPathComponent
     }
+}
+
+/// JSContext.evaluateScript 没有可传参的重载，须把参数内联进 source。
+/// 该函数把任意 String 转成「JS 双引号字符串字面量」：
+/// 可打印 ASCII 原样保留；转义 \、"、\n、\r；其余（控制字符与非 ASCII，含中文/emoji）
+/// 一律写成 \u{XXXX}（JS 的 ES6 大括号转义，JavaScriptCore 支持）——
+/// 这样字符串里不可能出现真实换行或会被源编码解析破坏的字节。
+private func jsStringLiteral(_ raw: String) -> String {
+    var out = "\""
+    for scalar in raw.unicodeScalars {
+        let v = scalar.value
+        switch v {
+        case 0x5C: out += "\\\\"   // backslash
+        case 0x22: out += "\\\""   // double quote
+        case 0x0A: out += "\\n"
+        case 0x0D: out += "\\r"
+        default:
+            if v < 0x20 || v >= 0x7F {
+                out += "\\u{" + String(format: "%04X", v) + "}"
+            } else {
+                out.unicodeScalars.append(scalar)
+            }
+        }
+    }
+    out += "\""
+    return out
 }
 
 // MARK: - 本地存储宿主
