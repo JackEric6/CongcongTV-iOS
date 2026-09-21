@@ -1,0 +1,63 @@
+name: Build unsigned Flutter iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "CongcongTV/**"
+      - "CongcongTV.xcodeproj/**"
+      - "lib/**"
+      - "assets/**"
+      - "native_ios/**"
+      - "pubspec.yaml"
+      - ".github/workflows/build-unsigned-ipa.yml"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Flutter iOS host
+        run: |
+          rm -rf .flutter-build
+          flutter create --platforms=ios --org com.congcong --project-name congcongtv --no-pub .flutter-build
+          cp pubspec.yaml .flutter-build/pubspec.yaml
+          rm -rf .flutter-build/lib .flutter-build/assets
+          cp -R lib .flutter-build/lib
+          cp -R assets .flutter-build/assets
+          cp native_ios/AppDelegate.swift .flutter-build/ios/Runner/AppDelegate.swift
+          cp native_ios/IOSSpiderRunner.swift .flutter-build/ios/Runner/IOSSpiderRunner.swift
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 丛丛影视" .flutter-build/ios/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" .flutter-build/ios/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" .flutter-build/ios/Runner/Info.plist || true
+
+      - name: Resolve Flutter packages
+        working-directory: .flutter-build
+        run: flutter pub get
+
+      - name: Build without Apple signing
+        working-directory: .flutter-build
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        run: |
+          rm -rf Payload CongcongTV-unsigned.ipa
+          mkdir Payload
+          cp -R .flutter-build/build/ios/iphoneos/Runner.app Payload/CongcongTV.app
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload CongcongTV-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CongcongTV-unsigned-ipa
+          path: CongcongTV-unsigned.ipa
+          if-no-files-found: error
