@@ -1,0 +1,17 @@
+# Xcode / 构建产物
+DerivedData/
+build/
+*.ipa
+*.app
+*.dSYM
+*.xcconfig
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# XcodeGen 生成的工程（CI 上由 project.yml 生成；本地也可删除后重新 generate）
+CongcongTV.xcodeproj/

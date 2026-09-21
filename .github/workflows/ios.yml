@@ -1,0 +1,64 @@
+# 在 GitHub Actions 的 macOS runner 上用 XcodeGen 生成工程并构建无签名 IPA。
+# 你本机是 Windows，无需任何 macOS 环境；项目文件（project.yml）提交后由 CI 代建。
+name: Build iOS App (IPA)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ios
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build IPA (无签名)
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 选择 Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 无签名构建 Release（iphoneos）
+        run: |
+          xcodebuild \
+            -project CongcongTV.xcodeproj \
+            -scheme CongcongTV \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            -derivedDataPath build/DerivedData \
+            build
+
+      - name: 打包 IPA（无签名 .app → .ipa）
+        run: |
+          APP="build/DerivedData/Build/Products/Release-iphoneos/CongcongTV.app"
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          cd build && zip -qry CongcongTV.ipa Payload
+
+      - name: 上传 IPA 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: CongcongTV-ipa
+          path: build/CongcongTV.ipa
+          if-no-files-found: error
+          retention-days: 14
