@@ -13,3 +13,5 @@ ios/.symlinks/
 ios/Flutter/ephemeral/
 .research-*/
 .toolcache/
+bridge/tvbox-Swift-macOS/
+bridge/local/state/
