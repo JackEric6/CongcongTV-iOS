@@ -82,6 +82,20 @@ if proj:
         for r in tgt.get("resources", []):
             resources.append((r["path"], r.get("folderType")))
         ok("target.resources 声明 %d 项" % len(resources))
+        # XcodeGen 没有 target 级 resources 键（写了会被整体忽略、资源进不了包），
+        # 资源必须放在 sources[] 里（buildPhase: resources / type folder / xcassets）。
+        for r in tgt.get("sources", []):
+            if isinstance(r, dict):
+                if r.get("buildPhase") == "resources":
+                    resources.append((r["path"], r.get("type")))
+                if r.get("type") == "folder":
+                    # 目录用 type: folder 的 source 也是资源（按原层级拷入）
+                    resources.append((r["path"], "folder"))
+        res_sources = [r["path"] for r in (tgt.get("sources") or []) if isinstance(r, dict)]
+        if any("Assets.xcassets" in str(p) for p in res_sources):
+            ok("Assets.xcassets 在 sources 中声明（编译进 asset catalog）")
+        else:
+            bad("Assets.xcassets 未在 sources 中声明（App 图标将缺失）")
 else:
     name_ok = False
 
@@ -112,16 +126,20 @@ def collect_bundle_refs():
 refs = collect_bundle_refs()
 ok("Bundle.main.url 调用共 %d 处" % len(refs))
 anchor = os.path.join(APP, "Resources")
+norm_of_anchor = anchor.replace(os.sep, "/")
 for rel, name, ext, subdir in refs:
     path = os.path.join(anchor, subdir, name + "." + ext)
     file_ok = os.path.isfile(path)
     declared = False
     for rpath, ft in resources:
-        base = rpath.replace("CongcongTV/", "").replace(anchor + os.sep, "")
-        # project.yml 资源路径是从仓库根写的（如 CongcongTV/Resources/js）
-        rdir = os.path.join(APP, "Resources")
-        if ft == "folder":
-            rdir = os.path.join(rdir, base) if base else rdir
+        base = rpath.replace("\\", "/")
+        # project.yml 资源路径是从仓库根写的（如 CongcongTV/Resources/js），
+        # 目录名即 bundle 里的顶层子目录（js / config）——只需截取目录短名。
+        for prefix in ("CongcongTV/Resources/", "Resources/", norm_of_anchor):
+            if base.startswith(prefix):
+                base = base[len(prefix):]
+                break
+        base = base.strip("/")
         relfile = os.path.join(subdir, name + "." + ext).replace(os.sep, "/")
         reldir = (base + "/").replace("\\", "/") if base else ""
         if ft == "folder":
@@ -184,11 +202,17 @@ except Exception as e:
 
 # ---------- 4) ATS ----------
 if proj and name_ok:
-    s = json.dumps(proj, ensure_ascii=False)
-    if "NSAllowsArbitraryLoads" in s and "true" in s:
-        ok("ATS NSAllowsArbitraryLoads=true 已配置")
+    tgt = proj.get("targets", {}).get("CongcongTV", {})
+    info = tgt.get("info") or {}
+    props = info.get("properties") if isinstance(info, dict) else None
+    ats = {"NSAllowsArbitraryLoads": False}
+    if isinstance(props, dict):
+        ats = (props.get("NSAppTransportSecurity") or {})
+    if ats.get("NSAllowsArbitraryLoads") is True:
+        ok("ATS: info.properties.NSAppTransportSecurity.NSAllowsArbitraryLoads=true（嵌套字典，真实生效）")
     else:
-        bad("ATS NSAllowsArbitraryLoads=true 未在 project.yml 配置（http 直链无法播放）")
+        bad("ATS: 未在 info.properties 找到 NSAppTransportSecurity.NSAllowsArbitraryLoads=true（http 直链无法播放）")
+        bad("     （注意：INFOPLIST_KEY_NSAppTransportSecurity_… 写法无法生成嵌套字典，请用 info.properties）")
 
 # ---------- 5) Swift import 框架匹配 + 孤儿符号 ----------
 FRAME_IMPORT = {

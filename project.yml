@@ -16,38 +16,59 @@ targets:
   CongcongTV:
     type: application
     platform: iOS
+    # 显式 Info.plist（此前 GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_ 只能生成扁平键，
+    # 生成不了嵌套的 NSAppTransportSecurity 字典 → ATS 缺失，http 直播/配置全被拦截）。
+    # 这里直接写全属性，含嵌套字典；$(变量) 由 builtin-infoPlistUtility 在构建时展开。
+    info:
+      path: CongcongTV/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: 丛丛影视
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleName: $(PRODUCT_NAME)
+        CFBundlePackageType: $(PRODUCT_BUNDLE_PACKAGE_TYPE)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # http 直播源 / http 配置地址：全部放行（ATS 例外）
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     sources:
       - path: CongcongTV
         # 资源目录单独声明（保持 js/js-rules/config 相对结构），避免被当普通文件夹混进 sources
         excludes:
           - Resources
-    resources:
-      # 蓝色文件夹引用（folderType: folder）→ bundle 里保留 js/ 与 config/ 目录层级，
-      # 代码用 Bundle.main.url(forResource:withExtension:subdirectory:) 原样命中：
+      # 注意：XcodeGen 没有 target 级 resources 键（此前写错了被整体忽略，导致资源根本没进包）。
+      # 正确写法：sources 条目 + buildPhase: resources；目录用 type: folder（蓝色文件夹引用），
+      # Copy Bundle Resources 阶段会把整个目录按原层级拷入 bundle：
       #   js/JSEnv.bundle.js、js/rules/虎牙.js…、config/movie2.json
       - path: CongcongTV/Resources/js
-        folderType: folder
+        type: folder
+        buildPhase: resources
       - path: CongcongTV/Resources/config
-        folderType: folder
+        type: folder
+        buildPhase: resources
       - path: CongcongTV/Resources/Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.congcongtv.ios
         PRODUCT_NAME: CongcongTV
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: 丛丛影视
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "1.0.0"
         SWIFT_EMIT_LOC_STRINGS: YES
-        # http 直播源 / http 配置地址：全部放行（ATS 例外）
-        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: true
       configs:
         Debug:
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
