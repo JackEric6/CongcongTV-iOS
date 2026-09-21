@@ -1,0 +1,68 @@
+name: Build Flutter iOS Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git branch or commit containing the Flutter project
+        required: true
+        default: flutter-codex
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Flutter branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Flutter iOS host
+        shell: bash
+        run: |
+          rm -rf .flutter-build
+          flutter create --platforms=ios --org com.congcong --project-name congcongtv --no-pub .flutter-build
+          cp pubspec.yaml .flutter-build/pubspec.yaml
+          rm -rf .flutter-build/lib .flutter-build/assets
+          cp -R lib .flutter-build/lib
+          cp -R assets .flutter-build/assets
+          cp native_ios/AppDelegate.swift .flutter-build/ios/Runner/AppDelegate.swift
+          cp native_ios/IOSSpiderRunner.swift .flutter-build/ios/Runner/IOSSpiderRunner.swift
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string 丛丛影视' .flutter-build/ios/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity dict' .flutter-build/ios/Runner/Info.plist || true
+          /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true' .flutter-build/ios/Runner/Info.plist || true
+
+      - name: Resolve Flutter packages
+        working-directory: .flutter-build
+        run: flutter pub get
+
+      - name: Build unsigned iOS app
+        working-directory: .flutter-build
+        run: flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          rm -rf Payload CongcongTV-Flutter.ipa
+          mkdir Payload
+          cp -R .flutter-build/build/ios/iphoneos/Runner.app Payload/CongcongTV.app
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload CongcongTV-Flutter.ipa
+
+      - name: Upload Flutter IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CongcongTV-flutter-ipa
+          path: CongcongTV-Flutter.ipa
+          if-no-files-found: error
+          retention-days: 14
