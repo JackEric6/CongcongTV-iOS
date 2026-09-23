@@ -77,7 +77,7 @@ actor XiguaCMSService {
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode),
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let mediaURL = stringValue(root?["url"]),
+                  let mediaURL = stringValue(root["url"]),
                   !mediaURL.isEmpty else {
                 return value
             }
