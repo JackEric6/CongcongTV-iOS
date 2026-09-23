@@ -1,5 +1,5 @@
 import SwiftUI
-import AVKit
+import KSPlayer
 
 /// 详情页：紧凑信息头 + 简介 + 分集列表，点击分集进入播放器。
 /// 需要 source 信息才能调用引擎的 detail/play，因此通过 sourceKey 反查站点。
@@ -13,7 +13,7 @@ struct DetailView: View {
     @State private var episodes: [Episode] = []
     @State private var playSources: [PlaySource] = []
     @State private var selectedFlag: String = ""
-    @State private var playing: AVPlayer?
+    @State private var loadingDetail = false
     @State private var errorText: String?
     /// 播放器 sheet 用的 Identifiable 包装
     @State private var playerItem: PlayerItem?
@@ -54,6 +54,16 @@ struct DetailView: View {
                     }
                 }
                 .padding(.horizontal, 12)
+
+                if loadingDetail {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("正在加载播放信息…")
+                    }
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 12)
+                }
 
                 // 分集
                 if playSources.count > 1 {
@@ -103,19 +113,12 @@ struct DetailView: View {
                 .accessibilityLabel(store.isFavorite(detail ?? vod) ? "取消收藏" : "收藏")
             }
         }
-        .fullScreenCover(item: $playerItem) { _ in
+        .fullScreenCover(item: $playerItem) { item in
             ZStack(alignment: .topTrailing) {
-                if let playing {
-                    NativePlayerView(player: playing)
-                        .ignoresSafeArea()
-                        .onAppear { playing.play() }
-                } else {
-                    Color.black.ignoresSafeArea()
-                }
+                KSVideoPlayerView(url: item.url, options: item.options, title: item.title)
+                    .ignoresSafeArea()
 
                 Button {
-                    playing?.pause()
-                    playing = nil
                     playerItem = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -136,11 +139,6 @@ struct DetailView: View {
         } message: {
             Text(errorText ?? "未知错误")
         }
-        .onChange(of: playing) { newValue in
-            if newValue != nil, playerItem == nil {
-                playerItem = PlayerItem(flag: selectedFlag)
-            }
-        }
         .onChange(of: selectedFlag) { _, newValue in
             episodes = playSources.first(where: { $0.name == newValue })?.episodes ?? []
         }
@@ -149,7 +147,11 @@ struct DetailView: View {
     private func play(episode: Episode) {
         errorText = nil
         if isXiguaSource {
-            startPlayback(urlString: episode.url, sourceName: XiguaCMSService.sourceName)
+            startPlayback(
+                urlString: episode.url,
+                sourceName: XiguaCMSService.sourceName,
+                episodeName: episode.name
+            )
             return
         }
         guard let site else {
@@ -167,7 +169,10 @@ struct DetailView: View {
     }
 
     private func loadDetailIfNeeded() async {
-        guard detail == nil else { return }
+        guard detail == nil, !loadingDetail else { return }
+        loadingDetail = true
+        defer { loadingDetail = false }
+
         let d: VOD?
         if isXiguaSource {
             d = await XiguaCMSService.shared.detail(vodId: vod.vod_id)
@@ -176,9 +181,14 @@ struct DetailView: View {
         } else {
             return
         }
+        guard let d else {
+            errorText = "未能加载影片详情，请稍后重试"
+            return
+        }
         detail = d
-        if let d {
-            configurePlaySources(for: d)
+        configurePlaySources(for: d)
+        if episodes.isEmpty {
+            errorText = "该影片暂无可播放分集"
         }
     }
 
@@ -199,11 +209,29 @@ struct DetailView: View {
     }
 
     private func startPlayback(urlString: String, sourceName: String) {
-        guard let url = URL(string: urlString) else {
+        let normalizedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: normalizedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
             errorText = "播放地址无效"
             return
         }
         startPlayback(url: url, headers: nil, sourceName: sourceName)
+    }
+
+    private func startPlayback(
+        urlString: String,
+        sourceName: String,
+        episodeName: String
+    ) {
+        let normalizedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: normalizedURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            errorText = "播放地址无效"
+            return
+        }
+        startPlayback(url: url, headers: nil, sourceName: sourceName, episodeName: episodeName)
     }
 
     private func startPlayback(
@@ -212,18 +240,25 @@ struct DetailView: View {
         sourceName: String,
         episodeName: String? = nil
     ) {
-        let options: [String: Any] = headers.map {
-            ["AVURLAssetHTTPHeaderFieldsKey": $0]
-        } ?? [:]
-        let asset = AVURLAsset(url: url, options: options)
-        playing = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        let options = KSOptions()
+        if let headers, !headers.isEmpty {
+            options.appendHeader(headers)
+        }
+        let resolvedEpisodeName = episodeName
+            ?? episodes.first(where: { $0.url == url.absoluteString })?.name
+            ?? "播放"
+        playerItem = PlayerItem(
+            url: url,
+            options: options,
+            title: episodeName.map { "\(vod.vod_name) - \($0)" } ?? vod.vod_name
+        )
         store.addHistory(ConfigStore.HistoryItem(
             vod_id: vod.vod_id,
             vod_name: vod.vod_name,
             vod_pic: vod.vod_pic,
             sourceKey: vod.sourceKey ?? "",
             sourceName: sourceName,
-            episodeName: episodeName ?? episodes.first(where: { $0.url == url.absoluteString })?.name ?? "播放"
+            episodeName: resolvedEpisodeName
         ))
     }
 }
@@ -238,5 +273,7 @@ private struct PlaySource: Identifiable {
 /// sheet 的 .item 包装
 struct PlayerItem: Identifiable {
     let id = UUID()
-    let flag: String
+    let url: URL
+    let options: KSOptions
+    let title: String
 }

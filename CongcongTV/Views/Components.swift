@@ -100,7 +100,9 @@ struct VodGrid: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(vods) { vod in
-                NavigationLink(value: vod) {
+                NavigationLink {
+                    DetailView(vod: vod)
+                } label: {
                     VodCard(vod: vod)
                 }
                 .buttonStyle(.plain)

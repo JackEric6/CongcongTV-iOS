@@ -40,6 +40,35 @@ actor XiguaCMSService {
         ]).first
     }
 
+    /// 将西瓜播放字段解析为可直接交给播放器的媒体地址。
+    /// 已经是 m3u8、mp4、flv、ts 等直链时不会发起额外请求；普通播放页解析失败则回退原地址。
+    func resolvePlaybackURL(_ value: String) async -> String {
+        let original = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !original.isEmpty else { return value }
+        guard let pageURL = URL(string: original), isHTTPURL(pageURL) else { return value }
+        guard !isDirectMediaURL(pageURL) else { return original }
+
+        var request = URLRequest(url: pageURL)
+        request.timeoutInterval = 15
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  let body = String(data: data, encoding: .utf8),
+                  let mediaURL = extractMediaURL(from: body, baseURL: pageURL) else {
+                return value
+            }
+            return mediaURL
+        } catch {
+            return value
+        }
+    }
+
     private func loadVods(_ queryItems: [URLQueryItem]) async -> [VOD] {
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
             return []
@@ -102,5 +131,58 @@ actor XiguaCMSService {
         default:
             return nil
         }
+    }
+
+    private func extractMediaURL(from body: String, baseURL: URL) -> String? {
+        let content = unescape(body)
+        let patterns = [
+            #"(?i)[\"'](?:url|playurl|play_url|file|src)[\"']\s*[:=]\s*[\"']([^\"']+)[\"']"#,
+            #"(?i)(?:url|playurl|play_url|file|src)\s*=\s*[\"']([^\"']+)[\"']"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(content.startIndex..<content.endIndex, in: content)
+            for match in regex.matches(in: content, range: range) {
+                guard match.numberOfRanges > 1,
+                      let valueRange = Range(match.range(at: 1), in: content) else { continue }
+                let rawCandidate = String(content[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let candidate = absoluteURL(rawCandidate, relativeTo: baseURL),
+                      isDirectMediaURL(candidate) else { continue }
+                return candidate.absoluteString
+            }
+        }
+        return nil
+    }
+
+    private func absoluteURL(_ value: String, relativeTo baseURL: URL) -> URL? {
+        var candidate = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\/", with: "/")
+        if candidate.hasPrefix("//") {
+            candidate = "\(baseURL.scheme ?? "https"):\(candidate)"
+        }
+        return URL(string: candidate, relativeTo: baseURL)?.absoluteURL
+    }
+
+    private func isDirectMediaURL(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        return [".m3u8", ".mp4", ".flv", ".ts", ".mkv", ".webm", ".mov"]
+            .contains(where: { path.hasSuffix($0) })
+    }
+
+    private func isHTTPURL(_ url: URL) -> Bool {
+        let scheme = url.scheme?.lowercased()
+        return scheme == "http" || scheme == "https"
+    }
+
+    private func unescape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\/", with: "/")
+            .replacingOccurrences(of: "\\u002F", with: "/")
+            .replacingOccurrences(of: "\\u002f", with: "/")
+            .replacingOccurrences(of: "\\u0026", with: "&")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
     }
 }
