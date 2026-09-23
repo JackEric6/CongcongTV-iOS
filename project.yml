@@ -22,7 +22,7 @@ targets:
     info:
       path: CongcongTV/Resources/Info.plist
       properties:
-        CFBundleDisplayName: 丛丛影视
+        CFBundleDisplayName: CongcongTV
         CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
         CFBundleExecutable: $(EXECUTABLE_NAME)
         CFBundleName: $(PRODUCT_NAME)
