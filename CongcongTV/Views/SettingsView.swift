@@ -31,7 +31,7 @@ struct SettingsView: View {
                     Button("恢复默认") {
                         urlText = ConfigStore.defaultConfigURL
                         _ = store.loadBuiltin()
-                        message = "已恢复为内置 movie2 配置"
+                        message = "已恢复为内置西瓜配置"
                     }
                     .buttonStyle(.bordered)
                 }
@@ -69,7 +69,7 @@ struct SettingsView: View {
 
             Section("关于") {
                 LabeledContent("应用", value: "丛丛影视 CactusTV")
-                Text("基于原有 movie2 配置解析，Android jar 源在 iOS 上仅作展示")
+                Text("基于内置西瓜配置解析，iOS 直接请求 HTTPS CMS 上游")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }

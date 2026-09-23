@@ -11,6 +11,7 @@ struct DetailView: View {
 
     @State private var detail: VOD?
     @State private var episodes: [Episode] = []
+    @State private var playSources: [PlaySource] = []
     @State private var selectedFlag: String = ""
     @State private var playing: AVPlayer?
     @State private var errorText: String?
@@ -20,6 +21,10 @@ struct DetailView: View {
     private var site: Site? {
         guard let key = vod.sourceKey else { return nil }
         return store.config.sites.first { $0.key == key && $0.isUsableOnIOS }
+    }
+
+    private var isXiguaSource: Bool {
+        vod.sourceKey == XiguaCMSService.sourceKey
     }
 
     var body: some View {
@@ -51,6 +56,16 @@ struct DetailView: View {
                 .padding(.horizontal, 12)
 
                 // 分集
+                if playSources.count > 1 {
+                    Picker("线路", selection: $selectedFlag) {
+                        ForEach(playSources) { source in
+                            Text(source.name).tag(source.name)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 12)
+                }
+
                 if !episodes.isEmpty {
                     Text("选集")
                         .font(.headline)
@@ -126,10 +141,17 @@ struct DetailView: View {
                 playerItem = PlayerItem(flag: selectedFlag)
             }
         }
+        .onChange(of: selectedFlag) { _, newValue in
+            episodes = playSources.first(where: { $0.name == newValue })?.episodes ?? []
+        }
     }
 
     private func play(episode: Episode) {
         errorText = nil
+        if isXiguaSource {
+            startPlayback(urlString: episode.url, sourceName: XiguaCMSService.sourceName)
+            return
+        }
         guard let site else {
             errorText = "该站点不可用"
             return
@@ -140,34 +162,77 @@ struct DetailView: View {
                 errorText = "解析失败：\(episode.url)"
                 return
             }
-            let options: [String: Any] = pr.header.map {
-                ["AVURLAssetHTTPHeaderFieldsKey": $0]
-            } ?? [:]
-            let asset = AVURLAsset(url: url, options: options)
-            let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
-            playing = player
-            store.addHistory(ConfigStore.HistoryItem(
-                vod_id: vod.vod_id,
-                vod_name: vod.vod_name,
-                vod_pic: vod.vod_pic,
-                sourceKey: site.key,
-                sourceName: site.name,
-                episodeName: episode.name
-            ))
+            startPlayback(url: url, headers: pr.header, sourceName: site.name, episodeName: episode.name)
         }
     }
 
     private func loadDetailIfNeeded() async {
-        guard detail == nil, let site else { return }
-        let d = await engine.loadDetail(for: site, vodId: vod.vod_id)
+        guard detail == nil else { return }
+        let d: VOD?
+        if isXiguaSource {
+            d = await XiguaCMSService.shared.detail(vodId: vod.vod_id)
+        } else if let site {
+            d = await engine.loadDetail(for: site, vodId: vod.vod_id)
+        } else {
+            return
+        }
         detail = d
         if let d {
-            // vod_play_from 是来源名的 # 分隔（一般单源）
-            let flags = d.vod_play_from.split(separator: "#").map(String.init)
-            selectedFlag = flags.first ?? "播放"
-            episodes = Mapper.episodes(from: d.vod_play_url)
+            configurePlaySources(for: d)
         }
     }
+
+    private func configurePlaySources(for vod: VOD) {
+        let flags = vod.vod_play_from.components(separatedBy: "$$$")
+        let urls = vod.vod_play_url.components(separatedBy: "$$$")
+        playSources = zip(flags, urls).compactMap { flag, urls in
+            let name = flag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let episodes = Mapper.episodes(from: urls)
+            guard !name.isEmpty, !episodes.isEmpty else { return nil }
+            return PlaySource(name: name, episodes: episodes)
+        }
+        if playSources.isEmpty, !vod.vod_play_url.isEmpty {
+            playSources = [PlaySource(name: "播放", episodes: Mapper.episodes(from: vod.vod_play_url))]
+        }
+        selectedFlag = playSources.first?.name ?? "播放"
+        episodes = playSources.first?.episodes ?? []
+    }
+
+    private func startPlayback(urlString: String, sourceName: String) {
+        guard let url = URL(string: urlString) else {
+            errorText = "播放地址无效"
+            return
+        }
+        startPlayback(url: url, headers: nil, sourceName: sourceName)
+    }
+
+    private func startPlayback(
+        url: URL,
+        headers: [String: String]?,
+        sourceName: String,
+        episodeName: String? = nil
+    ) {
+        let options: [String: Any] = headers.map {
+            ["AVURLAssetHTTPHeaderFieldsKey": $0]
+        } ?? [:]
+        let asset = AVURLAsset(url: url, options: options)
+        playing = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        store.addHistory(ConfigStore.HistoryItem(
+            vod_id: vod.vod_id,
+            vod_name: vod.vod_name,
+            vod_pic: vod.vod_pic,
+            sourceKey: vod.sourceKey ?? "",
+            sourceName: sourceName,
+            episodeName: episodeName ?? episodes.first(where: { $0.url == url.absoluteString })?.name ?? "播放"
+        ))
+    }
+}
+
+private struct PlaySource: Identifiable {
+    let name: String
+    let episodes: [Episode]
+
+    var id: String { name }
 }
 
 /// sheet 的 .item 包装

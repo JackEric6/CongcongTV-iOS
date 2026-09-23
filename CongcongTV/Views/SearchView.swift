@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// 全局搜索页：多站点并发搜索，结果按来源分组展示。
+/// 全局搜索页：优先搜索可直接播放的西瓜 CMS 资源。
 struct SearchView: View {
-    @EnvironmentObject private var engine: EngineManager
-    @EnvironmentObject private var config: ConfigStore
-
     private let initialQuery: String?
     @State private var query = ""
     @State private var results: [VOD] = []
@@ -124,7 +121,7 @@ struct SearchView: View {
         guard !wd.isEmpty else { return }
         searching = true
         searchedOnce = true
-        let items = await engine.searchSites(wd)
+        let items = await XiguaCMSService.shared.search(wd)
         results = items
         searching = false
     }

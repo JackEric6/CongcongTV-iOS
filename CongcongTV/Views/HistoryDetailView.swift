@@ -12,7 +12,15 @@ struct HistoryDetailView: View {
 
     var body: some View {
         Group {
-            if let site {
+            if item.sourceKey == XiguaCMSService.sourceKey {
+                DetailView(vod: VOD(
+                    vod_id: item.vod_id,
+                    vod_name: item.vod_name,
+                    vod_pic: item.vod_pic,
+                    sourceKey: XiguaCMSService.sourceKey,
+                    sourceName: XiguaCMSService.sourceName
+                ))
+            } else if let site {
                 let vod = VOD(vod_id: item.vod_id,
                               vod_name: item.vod_name,
                               vod_pic: item.vod_pic,

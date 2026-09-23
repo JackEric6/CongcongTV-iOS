@@ -2,14 +2,20 @@ import Foundation
 import Combine
 
 /// 配置仓库：内置 movie2 配置 + 用户自定义配置 URL / JSON。
-/// 「最主要的一点：还得用原有配置文件」—— 这里默认加载内置的旧 movie2 配置原文，
-/// 用户也可以填任意配置 URL（如 https://pse.is/9mr5uw 或直接贴 JSON）。
+/// 内置配置是 iOS 专用的西瓜资源配置，用户也可以填任意配置 URL 或直接贴 JSON。
 /// 配置文件本身从不被改写；解析出来的站点/直播只用原字段展示与调用。
 final class ConfigStore: ObservableObject {
     static let shared = ConfigStore()
 
-    /// 默认配置：丛丛影视原有的 movie2（ghproxy 镜像）
-    static let defaultConfigURL = "https://ghproxy.net/https://raw.githubusercontent.com/JackEric6/movie/refs/heads/main/movie2"
+    /// 默认配置：GitHub 西瓜分支中的单西瓜配置
+    static let defaultConfigURL = "https://raw.githubusercontent.com/JackEric6/movie/xgzy-config-20260922/movie2_xgzy"
+
+    private static let legacyDefaultConfigURLs: Set<String> = [
+        "https://ghproxy.net/https://raw.githubusercontent.com/JackEric6/movie/refs/heads/main/movie2",
+        "https://ghproxy.net/https://raw.githubusercontent.com/JackEric6/movie/main/movie2",
+        "https://raw.githubusercontent.com/JackEric6/movie/refs/heads/main/movie2",
+        "https://raw.githubusercontent.com/JackEric6/movie/main/movie2"
+    ]
 
     /// 用户保存的配置 URL（UserDefaults 持久化）
     @Published private(set) var userConfigURL: String {
@@ -42,14 +48,18 @@ final class ConfigStore: ObservableObject {
 
     private init() {
         let saved = UserDefaults.standard.string(forKey: Keys.userConfigURL)
-        /// 默认即内置 movie2；若用户从未设置，则用默认 URL（引导到内置配置加载）
-        userConfigURL = saved ?? Self.defaultConfigURL
+        /// 未设置或仍保存旧内置地址时，升级到西瓜默认配置；第三方地址保持不变。
+        if let saved, !Self.legacyDefaultConfigURLs.contains(saved) {
+            userConfigURL = saved
+        } else {
+            userConfigURL = Self.defaultConfigURL
+        }
         loadBuiltin()
     }
 
     // MARK: 加载
 
-    /// 从内置 bundle 加载 movie2.json
+    /// 从内置 bundle 加载 iOS 西瓜配置 movie2.json
     @discardableResult
     func loadBuiltin() -> Bool {
         guard let url = Bundle.main.url(forResource: "movie2", withExtension: "json", subdirectory: "config"),
