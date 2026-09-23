@@ -6,7 +6,7 @@
       "key": "xgzy",
       "name": "西瓜资源",
       "type": 1,
-      "api": "https://caiji.xgzyapi.com/api.php/provide/vod/from/xiguam3u8/",
+      "api": "http://127.0.0.1:9978/xgzy",
       "ext": "",
       "searchable": 1,
       "quickSearch": 1,

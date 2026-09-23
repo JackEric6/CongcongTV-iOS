@@ -15,7 +15,9 @@ struct DetailView: View {
     @State private var selectedFlag: String = ""
     @State private var loadingDetail = false
     @State private var errorText: String?
-    /// 播放器 sheet 用的 Identifiable 包装
+    @State private var isSynopsisExpanded = false
+    @State private var isEpisodeReversed = false
+    @State private var showAllEpisodes = true
     @State private var playerItem: PlayerItem?
 
     private var site: Site? {
@@ -27,21 +29,50 @@ struct DetailView: View {
         vod.sourceKey == XiguaCMSService.sourceKey
     }
 
+    private var visibleEpisodes: [Episode] {
+        let filtered = showAllEpisodes ? episodes : Array(episodes.prefix(12))
+        return isEpisodeReversed ? Array(filtered.reversed()) : filtered
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                // 标题下直接展示来源、备注与简介，避免海报占据详情页首屏高度。
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(detail?.vod_name ?? vod.vod_name)
-                        .font(.title3.bold())
-                        .lineLimit(2)
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    Color.black
+                    if let item = playerItem {
+                        KSVideoPlayerView(url: item.url, options: item.options, title: item.title)
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "play.rectangle")
+                                .font(.title)
+                                .foregroundStyle(.secondary)
+                            Text(loadingDetail ? "正在加载播放信息…" : "请选择分集开始播放")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(detail?.vod_name ?? vod.vod_name)
+                            .font(.title3.bold())
+                            .lineLimit(2)
+                        Spacer(minLength: 4)
+                        Button {
+                            store.toggleFavorite(detail ?? vod)
+                        } label: {
+                            Image(systemName: store.isFavorite(detail ?? vod) ? "star.fill" : "star")
+                                .foregroundStyle(.yellow)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(store.isFavorite(detail ?? vod) ? "取消收藏" : "收藏")
+                    }
                     HStack(spacing: 8) {
-                        if let rem = detail?.vod_remarks, !rem.isEmpty {
-                            Text(rem)
-                        }
-                        if let sn = vod.sourceName {
-                            Text(sn)
-                        }
+                        if let rem = detail?.vod_remarks, !rem.isEmpty { Text(rem) }
+                        if let sn = vod.sourceName { Text(sn) }
                     }
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -50,51 +81,94 @@ struct DetailView: View {
                         Text(content)
                             .font(.footnote)
                             .foregroundColor(.secondary)
-                            .lineLimit(4)
+                            .lineLimit(isSynopsisExpanded ? nil : 3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(isSynopsisExpanded ? "收起简介" : "展开简介") {
+                            isSynopsisExpanded.toggle()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
                     }
                 }
                 .padding(.horizontal, 12)
 
-                if loadingDetail {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("正在加载播放信息…")
-                    }
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                }
-
-                // 分集
-                if playSources.count > 1 {
-                    Picker("线路", selection: $selectedFlag) {
-                        ForEach(playSources) { source in
-                            Text(source.name).tag(source.name)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 12)
-                }
-
                 if !episodes.isEmpty {
-                    Text("选集")
-                        .font(.headline)
-                        .padding(.horizontal, 12)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
-                        ForEach(episodes) { ep in
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("选集")
+                                .font(.headline)
+                            Spacer()
                             Button {
-                                play(episode: ep)
+                                isEpisodeReversed.toggle()
                             } label: {
-                                Text(ep.name)
-                                    .font(.caption)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                                    .background(Color(.secondarySystemFill))
-                                    .cornerRadius(8)
+                                Label(isEpisodeReversed ? "正序" : "倒序", systemImage: "arrow.up.arrow.down")
                             }
-                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            Button {
+                                showAllEpisodes.toggle()
+                            } label: {
+                                Label(showAllEpisodes ? "部分" : "全部", systemImage: "square.grid.2x2")
+                            }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                        }
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], spacing: 8) {
+                            ForEach(visibleEpisodes) { ep in
+                                Button {
+                                    play(episode: ep)
+                                } label: {
+                                    Text(ep.name)
+                                        .font(.caption)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                        .background(isCurrentEpisode(ep) ? Color.accentColor : Color(.secondarySystemFill))
+                                        .foregroundStyle(isCurrentEpisode(ep) ? .white : .primary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal, 12)
+                }
+
+                if playSources.count > 1 {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("换源")
+                                .font(.headline)
+                            Spacer()
+                            Text("当前：\(selectedFlag)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(playSources) { source in
+                                    Button {
+                                        selectedFlag = source.name
+                                    } label: {
+                                        Text(source.name)
+                                            .font(.subheadline)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(selectedFlag == source.name ? Color.accentColor : Color(.secondarySystemFill))
+                                            .foregroundStyle(selectedFlag == source.name ? .white : .primary)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .padding(.horizontal, 12)
                 }
             }
@@ -103,34 +177,6 @@ struct DetailView: View {
         .navigationTitle("详情")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadDetailIfNeeded() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    store.toggleFavorite(detail ?? vod)
-                } label: {
-                    Image(systemName: store.isFavorite(detail ?? vod) ? "star.fill" : "star")
-                }
-                .accessibilityLabel(store.isFavorite(detail ?? vod) ? "取消收藏" : "收藏")
-            }
-        }
-        .fullScreenCover(item: $playerItem) { item in
-            ZStack(alignment: .topTrailing) {
-                KSVideoPlayerView(url: item.url, options: item.options, title: item.title)
-                    .ignoresSafeArea()
-
-                Button {
-                    playerItem = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.white)
-                }
-                .accessibilityLabel("关闭播放器")
-                .padding(.top, 18)
-                .padding(.trailing, 18)
-            }
-        }
         .alert("无法播放", isPresented: Binding(
             get: { errorText != nil },
             set: { if !$0 { errorText = nil } }
@@ -147,11 +193,21 @@ struct DetailView: View {
     private func play(episode: Episode) {
         errorText = nil
         if isXiguaSource {
-            startPlayback(
-                urlString: episode.url,
-                sourceName: XiguaCMSService.sourceName,
-                episodeName: episode.name
-            )
+            Task { @MainActor in
+                let resolvedURL = await XiguaCMSService.shared.resolvePlaybackURL(episode.url)
+                guard let url = URL(string: resolvedURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      let scheme = url.scheme?.lowercased(),
+                      scheme == "http" || scheme == "https" else {
+                    errorText = "解析失败：\(episode.url)"
+                    return
+                }
+                startPlayback(
+                    url: url,
+                    headers: nil,
+                    sourceName: XiguaCMSService.sourceName,
+                    episodeName: episode.name
+                )
+            }
             return
         }
         guard let site else {
@@ -260,6 +316,11 @@ struct DetailView: View {
             sourceName: sourceName,
             episodeName: resolvedEpisodeName
         ))
+    }
+
+    private func isCurrentEpisode(_ episode: Episode) -> Bool {
+        guard let title = playerItem?.title else { return false }
+        return title.hasSuffix(" - \(episode.name)")
     }
 }
 

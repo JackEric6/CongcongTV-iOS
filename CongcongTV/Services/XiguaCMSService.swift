@@ -8,7 +8,14 @@ actor XiguaCMSService {
     static let sourceKey = "xgzy"
     static let sourceName = "西瓜资源"
 
-    private let endpoint = URL(string: "https://caiji.xgzyapi.com/api.php/provide/vod/from/xiguam3u8/")!
+    /// 西瓜代理对父分类做了子分类聚合，iOS 端固定展示这四个入口。
+    static let parentCategories: [Category] = [
+        Category(type_id: "1", type_name: "电影"),
+        Category(type_id: "2", type_name: "连续剧"),
+        Category(type_id: "3", type_name: "综艺"),
+        Category(type_id: "4", type_name: "动漫")
+    ]
+
     private let session: URLSession
 
     private init(session: URLSession = .shared) {
@@ -32,6 +39,19 @@ actor XiguaCMSService {
         ])
     }
 
+    func categories() -> [Category] {
+        Self.parentCategories
+    }
+
+    /// 读取代理聚合后的父分类片单。代理负责将父分类映射到西瓜子分类并补齐海报。
+    func category(tid: String, page: Int = 1) async -> [VOD] {
+        guard Self.parentCategories.contains(where: { $0.type_id == tid }) else { return [] }
+        return await loadVods([
+            URLQueryItem(name: "t", value: tid),
+            URLQueryItem(name: "pg", value: String(max(1, page)))
+        ])
+    }
+
     func detail(vodId: String) async -> VOD? {
         guard !vodId.isEmpty else { return nil }
         return await loadVods([
@@ -40,27 +60,25 @@ actor XiguaCMSService {
         ]).first
     }
 
-    /// 将西瓜播放字段解析为可直接交给播放器的媒体地址。
-    /// 已经是 m3u8、mp4、flv、ts 等直链时不会发起额外请求；普通播放页解析失败则回退原地址。
+    /// 通过应用内代理将西瓜播放字段解析为可直接交给播放器的媒体地址。
+    /// 代理请求失败或没有返回有效地址时回退原始地址。
     func resolvePlaybackURL(_ value: String) async -> String {
         let original = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !original.isEmpty else { return value }
-        guard let pageURL = URL(string: original), isHTTPURL(pageURL) else { return value }
-        guard !isDirectMediaURL(pageURL) else { return original }
+        guard XiguaCMSProxy.shared.startIfNeeded() else { return value }
+        guard var components = URLComponents(string: XiguaCMSProxy.baseURL) else { return value }
+        components.queryItems = [URLQueryItem(name: "play", value: original)]
+        guard let url = components.url else { return value }
 
-        var request = URLRequest(url: pageURL)
+        var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        request.setValue(
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
-            forHTTPHeaderField: "User-Agent"
-        )
-
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode),
-                  let body = String(data: data, encoding: .utf8),
-                  let mediaURL = extractMediaURL(from: body, baseURL: pageURL) else {
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let mediaURL = stringValue(root?["url"]),
+                  !mediaURL.isEmpty else {
                 return value
             }
             return mediaURL
@@ -70,7 +88,8 @@ actor XiguaCMSService {
     }
 
     private func loadVods(_ queryItems: [URLQueryItem]) async -> [VOD] {
-        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+        guard XiguaCMSProxy.shared.startIfNeeded(),
+              var components = URLComponents(string: XiguaCMSProxy.baseURL) else {
             return []
         }
         components.queryItems = queryItems
@@ -78,11 +97,6 @@ actor XiguaCMSService {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        request.setValue(
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
-            forHTTPHeaderField: "User-Agent"
-        )
-
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -133,56 +147,4 @@ actor XiguaCMSService {
         }
     }
 
-    private func extractMediaURL(from body: String, baseURL: URL) -> String? {
-        let content = unescape(body)
-        let patterns = [
-            #"(?i)[\"'](?:url|playurl|play_url|file|src)[\"']\s*[:=]\s*[\"']([^\"']+)[\"']"#,
-            #"(?i)(?:url|playurl|play_url|file|src)\s*=\s*[\"']([^\"']+)[\"']"#
-        ]
-
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            let range = NSRange(content.startIndex..<content.endIndex, in: content)
-            for match in regex.matches(in: content, range: range) {
-                guard match.numberOfRanges > 1,
-                      let valueRange = Range(match.range(at: 1), in: content) else { continue }
-                let rawCandidate = String(content[valueRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let candidate = absoluteURL(rawCandidate, relativeTo: baseURL),
-                      isDirectMediaURL(candidate) else { continue }
-                return candidate.absoluteString
-            }
-        }
-        return nil
-    }
-
-    private func absoluteURL(_ value: String, relativeTo baseURL: URL) -> URL? {
-        var candidate = value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\\/", with: "/")
-        if candidate.hasPrefix("//") {
-            candidate = "\(baseURL.scheme ?? "https"):\(candidate)"
-        }
-        return URL(string: candidate, relativeTo: baseURL)?.absoluteURL
-    }
-
-    private func isDirectMediaURL(_ url: URL) -> Bool {
-        let path = url.path.lowercased()
-        return [".m3u8", ".mp4", ".flv", ".ts", ".mkv", ".webm", ".mov"]
-            .contains(where: { path.hasSuffix($0) })
-    }
-
-    private func isHTTPURL(_ url: URL) -> Bool {
-        let scheme = url.scheme?.lowercased()
-        return scheme == "http" || scheme == "https"
-    }
-
-    private func unescape(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\/", with: "/")
-            .replacingOccurrences(of: "\\u002F", with: "/")
-            .replacingOccurrences(of: "\\u002f", with: "/")
-            .replacingOccurrences(of: "\\u0026", with: "&")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-    }
 }

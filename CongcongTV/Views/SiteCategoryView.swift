@@ -97,7 +97,12 @@ struct SiteCategoryView: View {
             }
             return
         }
-        let cats = await engine.loadCategories(for: site)
+        let cats: [Category]
+        if site.key == XiguaCMSService.sourceKey {
+            cats = await XiguaCMSService.shared.categories()
+        } else {
+            cats = await engine.loadCategories(for: site)
+        }
         categories = cats
         loadedCats = true
         if let first = cats.first {
@@ -109,7 +114,13 @@ struct SiteCategoryView: View {
     private func loadPage(reset: Bool) async {
         guard let sel = selected else { return }
         loading = true
-        let items = await engine.loadCategory(for: site, tid: sel.type_id, pg: reset ? 1 : page)
+        let requestedPage = reset ? 1 : page
+        let items: [VOD]
+        if site.key == XiguaCMSService.sourceKey {
+            items = await XiguaCMSService.shared.category(tid: sel.type_id, page: requestedPage)
+        } else {
+            items = await engine.loadCategory(for: site, tid: sel.type_id, pg: requestedPage)
+        }
         loading = false
         if items.isEmpty {
             endReached = true

@@ -50,12 +50,21 @@ struct HomeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        SearchView()
-                    } label: {
-                        Image(systemName: "magnifyingglass")
+                    HStack(spacing: 16) {
+                        NavigationLink {
+                            CategoryView()
+                        } label: {
+                            Image(systemName: "square.grid.2x2")
+                        }
+                        .accessibilityLabel("分类")
+
+                        NavigationLink {
+                            SearchView()
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel("搜索")
                     }
-                    .accessibilityLabel("搜索")
                 }
             }
             .task { await load() }

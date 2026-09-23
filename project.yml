@@ -16,6 +16,9 @@ packages:
   KSPlayer:
     url: https://github.com/kingslay/KSPlayer.git
     exactVersion: 2.3.4
+  GCDWebServer:
+    url: https://github.com/yene/GCDWebServer.git
+    exactVersion: 3.5.7
 
 targets:
   CongcongTV:
@@ -24,6 +27,8 @@ targets:
     dependencies:
       - package: KSPlayer
         product: KSPlayer
+      - package: GCDWebServer
+        product: GCDWebServer
     # 显式 Info.plist（此前 GENERATE_INFOPLIST_FILE + INFOPLIST_KEY_ 只能生成扁平键，
     # 生成不了嵌套的 NSAppTransportSecurity 字典 → ATS 缺失，http 直播/配置全被拦截）。
     # 这里直接写全属性，含嵌套字典；$(变量) 由 builtin-infoPlistUtility 在构建时展开。
