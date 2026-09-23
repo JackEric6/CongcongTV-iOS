@@ -25,7 +25,7 @@ enum Mapper {
         guard let j = object(from: json) else { return [] }
         if let cl = j["class"] as? [[String: Any]] {
             return cl.compactMap { c in
-                guard let id = c["type_id"] as? String, let name = c["type_name"] as? String else { return nil }
+                guard let id = String(any: c["type_id"]), let name = c["type_name"] as? String else { return nil }
                 return Category(type_id: id, type_name: name)
             }
         }

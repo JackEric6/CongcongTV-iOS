@@ -1,7 +1,7 @@
 import SwiftUI
 import AVKit
 
-/// 详情页：海报 + 简介 + 分集列表，点击分集进入播放器。
+/// 详情页：紧凑信息头 + 简介 + 分集列表，点击分集进入播放器。
 /// 需要 source 信息才能调用引擎的 detail/play，因此通过 sourceKey 反查站点。
 struct DetailView: View {
     let vod: VOD
@@ -25,49 +25,30 @@ struct DetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 头部：海报 + 标题/备注
-                HStack(alignment: .top, spacing: 12) {
-                    RemoteImage(url: (detail?.vod_pic ?? vod.vod_pic), placeholder: "play.rectangle")
-                        .frame(width: 110, height: 165)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(detail?.vod_name ?? vod.vod_name)
-                            .font(.headline)
-                            .lineLimit(3)
+                // 标题下直接展示来源、备注与简介，避免海报占据详情页首屏高度。
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(detail?.vod_name ?? vod.vod_name)
+                        .font(.title3.bold())
+                        .lineLimit(2)
+                    HStack(spacing: 8) {
                         if let rem = detail?.vod_remarks, !rem.isEmpty {
                             Text(rem)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                         if let sn = vod.sourceName {
-                            Text("来自：\(sn)")
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                        }
-                        HStack(spacing: 10) {
-                            Button {
-                                store.toggleFavorite(detail ?? vod)
-                            } label: {
-                                Label(store.isFavorite(detail ?? vod) ? "已收藏" : "收藏",
-                                      systemImage: store.isFavorite(detail ?? vod) ? "star.fill" : "star")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.orange)
+                            Text(sn)
                         }
                     }
-                    Spacer()
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                    if let content = detail?.vod_content, !content.isEmpty {
+                        Text(content)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(4)
+                    }
                 }
                 .padding(.horizontal, 12)
-
-                // 简介
-                if let content = detail?.vod_content, !content.isEmpty {
-                    Text(content)
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .lineLimit(6)
-                        .padding(.horizontal, 12)
-                }
 
                 // 分集
                 if !episodes.isEmpty {
@@ -97,14 +78,48 @@ struct DetailView: View {
         .navigationTitle("详情")
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadDetailIfNeeded() }
-        .sheet(item: $playerItem) { _ in
-            NavigationStack {
-                PlayerSheetView(player: playing, onClose: {
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    store.toggleFavorite(detail ?? vod)
+                } label: {
+                    Image(systemName: store.isFavorite(detail ?? vod) ? "star.fill" : "star")
+                }
+                .accessibilityLabel(store.isFavorite(detail ?? vod) ? "取消收藏" : "收藏")
+            }
+        }
+        .fullScreenCover(item: $playerItem) { _ in
+            ZStack(alignment: .topTrailing) {
+                if let playing {
+                    NativePlayerView(player: playing)
+                        .ignoresSafeArea()
+                        .onAppear { playing.play() }
+                } else {
+                    Color.black.ignoresSafeArea()
+                }
+
+                Button {
+                    playing?.pause()
                     playing = nil
                     playerItem = nil
-                })
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white)
+                }
+                .accessibilityLabel("关闭播放器")
+                .padding(.top, 18)
+                .padding(.trailing, 18)
             }
-            .presentationDetents([.large])
+        }
+        .alert("无法播放", isPresented: Binding(
+            get: { errorText != nil },
+            set: { if !$0 { errorText = nil } }
+        )) {
+            Button("确定", role: .cancel) { errorText = nil }
+        } message: {
+            Text(errorText ?? "未知错误")
         }
         .onChange(of: playing) { newValue in
             if newValue != nil, playerItem == nil {
@@ -125,7 +140,11 @@ struct DetailView: View {
                 errorText = "解析失败：\(episode.url)"
                 return
             }
-            let player = AVPlayer(url: url)
+            let options: [String: Any] = pr.header.map {
+                ["AVURLAssetHTTPHeaderFieldsKey": $0]
+            } ?? [:]
+            let asset = AVURLAsset(url: url, options: options)
+            let player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
             playing = player
             store.addHistory(ConfigStore.HistoryItem(
                 vod_id: vod.vod_id,
@@ -155,25 +174,4 @@ struct DetailView: View {
 struct PlayerItem: Identifiable {
     let id = UUID()
     let flag: String
-}
-
-/// 播放器 sheet
-struct PlayerSheetView: View {
-    let player: AVPlayer?
-    var onClose: () -> Void
-
-    var body: some View {
-        VStack {
-            if let player {
-                VideoPlayer(player: player)
-            } else {
-                Text("无法播放")
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("完成") { onClose() }
-            }
-        }
-    }
 }

@@ -9,9 +9,8 @@ final class AppModel: ObservableObject {
 
     enum Tab: Hashable {
         case home
-        case category
-        case search
-        case live
+        case history
+        case favorites
         case settings
     }
 }
