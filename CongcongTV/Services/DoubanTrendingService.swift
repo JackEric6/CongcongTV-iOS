@@ -37,10 +37,11 @@ actor DoubanTrendingService {
     /// 加载热门条目。任何失败均回退到历史缓存，且不会向调用方抛出异常。
     func loadTrending() async -> [DoubanTrendingItem] {
         let today = dayString(for: Date())
-        if defaults.string(forKey: Keys.day) == today,
-           let cached = readCache(),
-           !cached.isEmpty {
-            return cached
+        if defaults.string(forKey: Keys.day) == today {
+            let cached = readCache()
+            if !cached.isEmpty {
+                return cached
+            }
         }
 
         do {
